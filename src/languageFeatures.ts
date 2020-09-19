@@ -140,12 +140,8 @@ function toSeverity(lsSeverity: number): MarkerSeverity {
 	}
 }
 
-function toDiagnostics(
-	resource: Uri,
-	diag: jsonService.Diagnostic
-): editor.IMarkerData {
-	let code =
-		typeof diag.code === 'number' ? String(diag.code) : <string>diag.code;
+function toDiagnostics(resource: Uri, diag: jsonService.Diagnostic): editor.IMarkerData {
+	let code = typeof diag.code === 'number' ? String(diag.code) : <string>diag.code;
 
 	return {
 		severity: toSeverity(diag.severity),
@@ -189,6 +185,30 @@ function toRange(range: jsonService.Range): Range {
 		range.start.character + 1,
 		range.end.line + 1,
 		range.end.character + 1
+	);
+}
+
+interface InsertReplaceEdit {
+	/**
+	 * The string to be inserted.
+	 */
+	newText: string;
+	/**
+	 * The range if the insert is requested
+	 */
+	insert: jsonService.Range;
+	/**
+	 * The range if the replace is requested.
+	 */
+	replace: jsonService.Range;
+}
+
+function isInsertReplaceEdit(
+	edit: jsonService.TextEdit | InsertReplaceEdit
+): edit is InsertReplaceEdit {
+	return (
+		typeof (<InsertReplaceEdit>edit).insert !== 'undefined' &&
+		typeof (<InsertReplaceEdit>edit).replace !== 'undefined'
 	);
 }
 
@@ -282,9 +302,7 @@ function fromCompletionItemKind(
 	return jsonService.CompletionItemKind.Property;
 }
 
-function toTextEdit(
-	textEdit: jsonService.TextEdit
-): editor.ISingleEditOperation {
+function toTextEdit(textEdit: jsonService.TextEdit): editor.ISingleEditOperation {
 	if (!textEdit) {
 		return void 0;
 	}
@@ -337,17 +355,21 @@ export class CompletionAdapter implements languages.CompletionItemProvider {
 						kind: toCompletionItemKind(entry.kind)
 					};
 					if (entry.textEdit) {
-						item.range = toRange(entry.textEdit.range);
+						if (isInsertReplaceEdit(entry.textEdit)) {
+							item.range = {
+								insert: toRange(entry.textEdit.insert),
+								replace: toRange(entry.textEdit.replace)
+							};
+						} else {
+							item.range = toRange(entry.textEdit.range);
+						}
 						item.insertText = entry.textEdit.newText;
 					}
 					if (entry.additionalTextEdits) {
-						item.additionalTextEdits = entry.additionalTextEdits.map(
-							toTextEdit
-						);
+						item.additionalTextEdits = entry.additionalTextEdits.map(toTextEdit);
 					}
 					if (entry.insertTextFormat === jsonService.InsertTextFormat.Snippet) {
-						item.insertTextRules =
-							languages.CompletionItemInsertTextRule.InsertAsSnippet;
+						item.insertTextRules = languages.CompletionItemInsertTextRule.InsertAsSnippet;
 					}
 					return item;
 				});
@@ -391,10 +413,7 @@ function toMarkdownString(
 }
 
 function toMarkedStringArray(
-	contents:
-		| jsonService.MarkupContent
-		| jsonService.MarkedString
-		| jsonService.MarkedString[]
+	contents: jsonService.MarkupContent | jsonService.MarkedString | jsonService.MarkedString[]
 ): IMarkdownString[] {
 	if (!contents) {
 		return void 0;
@@ -525,8 +544,7 @@ function fromFormattingOptions(
 	};
 }
 
-export class DocumentFormattingEditProvider
-	implements languages.DocumentFormattingEditProvider {
+export class DocumentFormattingEditProvider implements languages.DocumentFormattingEditProvider {
 	constructor(private _worker: WorkerAccessor) {}
 
 	public provideDocumentFormattingEdits(
@@ -563,11 +581,7 @@ export class DocumentRangeFormattingEditProvider
 
 		return this._worker(resource).then((worker) => {
 			return worker
-				.format(
-					resource.toString(),
-					fromRange(range),
-					fromFormattingOptions(options)
-				)
+				.format(resource.toString(), fromRange(range), fromFormattingOptions(options))
 				.then((edits) => {
 					if (!edits || edits.length === 0) {
 						return;
@@ -609,11 +623,7 @@ export class DocumentColorAdapter implements languages.DocumentColorProvider {
 
 		return this._worker(resource)
 			.then((worker) =>
-				worker.getColorPresentations(
-					resource.toString(),
-					info.color,
-					fromRange(info.range)
-				)
+				worker.getColorPresentations(resource.toString(), info.color, fromRange(info.range))
 			)
 			.then((presentations) => {
 				if (!presentations) {
@@ -627,9 +637,7 @@ export class DocumentColorAdapter implements languages.DocumentColorProvider {
 						item.textEdit = toTextEdit(presentation.textEdit);
 					}
 					if (presentation.additionalTextEdits) {
-						item.additionalTextEdits = presentation.additionalTextEdits.map(
-							toTextEdit
-						);
+						item.additionalTextEdits = presentation.additionalTextEdits.map(toTextEdit);
 					}
 					return item;
 				});
@@ -659,9 +667,7 @@ export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
 						end: range.endLine + 1
 					};
 					if (typeof range.kind !== 'undefined') {
-						result.kind = toFoldingRangeKind(
-							<jsonService.FoldingRangeKind>range.kind
-						);
+						result.kind = toFoldingRangeKind(<jsonService.FoldingRangeKind>range.kind);
 					}
 					return result;
 				});
@@ -669,9 +675,7 @@ export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
 	}
 }
 
-function toFoldingRangeKind(
-	kind: jsonService.FoldingRangeKind
-): languages.FoldingRangeKind {
+function toFoldingRangeKind(kind: jsonService.FoldingRangeKind): languages.FoldingRangeKind {
 	switch (kind) {
 		case jsonService.FoldingRangeKind.Comment:
 			return languages.FoldingRangeKind.Comment;
@@ -694,12 +698,7 @@ export class SelectionRangeAdapter implements languages.SelectionRangeProvider {
 		const resource = model.uri;
 
 		return this._worker(resource)
-			.then((worker) =>
-				worker.getSelectionRanges(
-					resource.toString(),
-					positions.map(fromPosition)
-				)
-			)
+			.then((worker) => worker.getSelectionRanges(resource.toString(), positions.map(fromPosition)))
 			.then((selectionRanges) => {
 				if (!selectionRanges) {
 					return;
