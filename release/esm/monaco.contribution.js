@@ -52,7 +52,9 @@ var diagnosticDefault = {
     validate: true,
     allowComments: true,
     schemas: [],
-    enableSchemaRequest: false
+    enableSchemaRequest: false,
+    schemaRequest: 'warning',
+    schemaValidation: 'warning'
 };
 var modeConfigurationDefault = {
     documentFormattingEdits: true,
